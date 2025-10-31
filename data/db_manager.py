@@ -189,8 +189,31 @@ class DatabaseManager:
         user = cursor.fetchone()
         conn.close()
         
-        if user and bcrypt.checkpw(password.encode(), user['password_hash']):
-            return dict(user)
+        if user:
+            stored = user['password_hash']
+            # Normalize to bytes for bcrypt
+            if isinstance(stored, memoryview):
+                stored_bytes = bytes(stored)
+            elif isinstance(stored, bytes):
+                stored_bytes = stored
+            elif isinstance(stored, str):
+                # Handle both plain hash string and repr of bytes
+                try:
+                    if stored.startswith("b'") or stored.startswith('b"'):
+                        import ast
+                        stored_bytes = ast.literal_eval(stored)
+                    else:
+                        stored_bytes = stored.encode('utf-8')
+                except Exception:
+                    stored_bytes = stored.encode('utf-8')
+            else:
+                try:
+                    stored_bytes = bytes(stored)
+                except Exception:
+                    stored_bytes = None
+
+            if stored_bytes is not None and bcrypt.checkpw(password.encode(), stored_bytes):
+                return dict(user)
         return None
     
     def update_user_password(self, user_id: int, new_password: str) -> bool:
