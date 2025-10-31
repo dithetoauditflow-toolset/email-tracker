@@ -181,6 +181,19 @@ class EmailSyncManager:
         internal_domains = internal_domains or []
         
         try:
+            # Read overrides from Streamlit secrets when available
+            inbox_folder = "INBOX"
+            sent_folder = "Sent"
+            days_back = SYNC_DAYS_BACK
+            force_full_resync = False
+            try:
+                import streamlit as st
+                inbox_folder = st.secrets.get("imap_inbox_folder", inbox_folder)
+                sent_folder = st.secrets.get("imap_sent_folder", sent_folder)
+                days_back = int(st.secrets.get("sync_days_back", days_back))
+                force_full_resync = bool(st.secrets.get("force_full_resync", False))
+            except Exception:
+                pass
             if callback:
                 callback("Preparing sync...", 0.01)
             # Get company emails to filter
@@ -192,10 +205,10 @@ class EmailSyncManager:
                     "emails_synced": 0
                 }
             
-            # Get last sync date or default to N days back
-            since_date = self.get_last_sync_date()
+            # Get last sync date or default window; allow force full resync
+            since_date = None if force_full_resync else self.get_last_sync_date()
             if not since_date:
-                since_date = datetime.now() - timedelta(days=SYNC_DAYS_BACK)
+                since_date = datetime.now() - timedelta(days=days_back)
             
             logger.info(f"Starting sync for auditor {self.auditor_id} since {since_date}")
             if callback:
@@ -209,23 +222,37 @@ class EmailSyncManager:
                     "emails_synced": 0
                 }
             
-            # Fetch incoming emails
+            # Fetch incoming emails (customizable folder)
             incoming = self.imap.fetch_emails(
-                folder="INBOX",
+                folder=inbox_folder,
                 since_date=since_date,
                 filter_addresses=company_emails,
-                callback=lambda msg, prog: callback(f"INBOX: {msg}", prog) if callback and msg else (callback(None, prog) if callback else None)
+                callback=lambda msg, prog: callback(f"{inbox_folder}: {msg}", prog) if callback and msg else (callback(None, prog) if callback else None)
             )
             if callback:
-                callback(f"Fetched {len(incoming)} incoming emails", 0.45)
+                callback(f"Fetched {len(incoming)} incoming emails from '{inbox_folder}'", 0.45)
             
-            # Fetch outgoing emails
-            outgoing = self.imap.fetch_sent_emails(
-                sent_folder="Sent",
-                since_date=since_date,
-                filter_addresses=company_emails,
-                callback=lambda msg, prog: callback(f"Sent: {msg}", prog) if callback and msg else (callback(None, prog) if callback else None)
-            )
+            # Fetch outgoing emails with fallback sent folders if needed
+            def _fetch_outgoing_with_fallback() -> List[Dict]:
+                folders_to_try = [sent_folder, "Sent Items", "[Gmail]/Sent Mail", "[Gmail]/Sent" ]
+                tried = set()
+                for fld in folders_to_try:
+                    if fld in tried:
+                        continue
+                    tried.add(fld)
+                    data = self.imap.fetch_sent_emails(
+                        sent_folder=fld,
+                        since_date=since_date,
+                        filter_addresses=company_emails,
+                        callback=lambda msg, prog: callback(f"{fld}: {msg}", prog) if callback and msg else (callback(None, prog) if callback else None)
+                    )
+                    # Return first non-empty result; if empty, continue trying others
+                    if len(data) > 0:
+                        return data
+                # If all empty, return last attempt's data (likely empty)
+                return data if 'data' in locals() else []
+
+            outgoing = _fetch_outgoing_with_fallback()
             if callback:
                 callback(f"Fetched {len(outgoing)} sent emails", 0.7)
             
