@@ -1,0 +1,262 @@
+# 📘 Product Requirements Document (PRD) & Development Plan
+
+## 🧭 Project Overview
+
+**Project Name:** Email Follow-Up Audit Tool
+**Platform:** Streamlit (multi-user)
+**Database:** SQLite (local file-based, fast I/O)
+**Deployment:** Streamlit Cloud
+**Primary Roles:**
+
+* **Admin** – Manages auditor accounts, internal domains, and follow-up settings.
+* **Auditor** – Uploads company lists, syncs emails, and tracks follow-up progress.
+
+### 🎯 Goal
+
+To automate the tracking of auditor-client email communication, identifying clients who have **not replied within X working days** after the last auditor email.
+
+---
+
+## ⚙️ Core Functionalities
+
+### 👤 1. Authentication System
+
+* Simple login with username/password stored securely in SQLite.
+* Roles: Admin (1) and multiple Auditors.
+* Admin can add/remove auditor accounts.
+
+### ⚡ 2. Auditor Dashboard
+
+* Upload company contact list (`UIF Ref`, `Trade Name`, `Email`, `Alt Email`).
+* View current list in editable Streamlit table.
+* Add/remove rows manually.
+* Start email synchronization process.
+* Display email counts, last sent/reply dates, and follow-up status.
+
+### 💬 3. Email Synchronization Module
+
+* Uses IMAP for incoming mail + SMTP for outgoing mail.
+* Each auditor stores email credentials locally (encrypted).
+* Pulls messages only from addresses in the uploaded list.
+* Excludes internal domains (editable by Admin).
+* Fetches and stores:
+
+  * `Message ID`
+  * `From`
+  * `To`
+  * `Subject`
+  * `Date`
+  * `Direction` (Incoming / Outgoing)
+* Maintains **sync checkpoints** to only fetch new messages after the last sync.
+
+### 📅 4. Follow-Up Logic
+
+* Calculates true **working days** between `last sent` and `last reply`.
+* Flags any contact exceeding the Admin-defined threshold (default: 3 days).
+* Ignores weekends and public holidays (static JSON or config file).
+
+### 📊 5. Overdue Tab
+
+* Displays contacts who haven’t replied within X working days.
+* Columns: `UIF Ref`, `Trade Name`, `Email`, `Last Sent`, `Last Reply`, `Days Since Last Reply`.
+* Allows export to Excel.
+
+### 🧰 6. Admin Panel
+
+* Manage auditor accounts (add/remove/reset password).
+* Manage internal domains list (e.g., `@rbrgroup.co.za`).
+* Set follow-up threshold (in working days).
+* View overall summary per auditor.
+
+---
+
+## 🧱 System Architecture
+
+```
+streamlit_app/
+│
+├── main.py                  # Streamlit entrypoint, routing
+├── auth/                    # Authentication logic
+│   ├── login.py
+│   ├── register.py
+│   ├── session_manager.py
+│
+├── email_sync/              # Email fetching & storage
+│   ├── imap_handler.py
+│   ├── smtp_handler.py
+│   ├── email_parser.py
+│   ├── sync_manager.py
+│
+├── data/                    # Data models & persistence
+│   ├── db_manager.py        # SQLite connection manager
+│   ├── models.py            # Tables: users, emails, companies, settings
+│   ├── holidays.json        # Public holidays config
+│
+├── ui/                      # Streamlit pages
+│   ├── admin_page.py
+│   ├── auditor_dashboard.py
+│   ├── overdue_tab.py
+│
+├── utils/                   # Helper modules
+│   ├── date_utils.py        # Working day calculations
+│   ├── encryption.py        # Store email credentials securely
+│   ├── logger.py
+│
+└── tests/                   # Unit & integration tests
+    ├── test_db.py
+    ├── test_email_sync.py
+    ├── test_followup_logic.py
+```
+
+---
+
+## 🧩 Database Schema (SQLite)
+
+### `users`
+
+| Field         | Type    | Description                  |
+| ------------- | ------- | ---------------------------- |
+| id            | INTEGER | Primary key                  |
+| username      | TEXT    | Unique                       |
+| password_hash | TEXT    | Encrypted password           |
+| role          | TEXT    | 'admin' or 'auditor'         |
+| email_config  | JSON    | Encrypted IMAP/SMTP settings |
+
+### `companies`
+
+| Field      | Type    | Description          |
+| ---------- | ------- | -------------------- |
+| id         | INTEGER | Primary key          |
+| auditor_id | INTEGER | FK to users          |
+| uif_ref    | TEXT    | UIF reference number |
+| trade_name | TEXT    | Company name         |
+| email      | TEXT    | Main email address   |
+| alt_email  | TEXT    | Alternative email    |
+
+### `emails`
+
+| Field      | Type     | Description              |
+| ---------- | -------- | ------------------------ |
+| id         | INTEGER  | Primary key              |
+| auditor_id | INTEGER  | FK to users              |
+| company_id | INTEGER  | FK to companies          |
+| direction  | TEXT     | 'incoming' or 'outgoing' |
+| from_addr  | TEXT     | Email sender             |
+| to_addr    | TEXT     | Recipient                |
+| subject    | TEXT     | Email subject            |
+| date       | DATETIME | Email timestamp          |
+
+### `settings`
+
+| Field | Type | Description                               |
+| ----- | ---- | ----------------------------------------- |
+| key   | TEXT | e.g., 'internal_domains', 'followup_days' |
+| value | TEXT | JSON or text value                        |
+
+### `sync_log`
+
+| Field      | Type     | Description          |
+| ---------- | -------- | -------------------- |
+| auditor_id | INTEGER  | FK to users          |
+| last_sync  | DATETIME | Last sync checkpoint |
+
+---
+
+## 🧠 Core Logic & Rules
+
+1. **Sync Filtering:**
+
+   * Exclude internal domains in Admin settings.
+   * Include only contacts from auditor’s company list.
+
+2. **Working Day Calculation:**
+
+   * Use `date_utils.get_working_days(start, end)`.
+   * Skip weekends and listed holidays.
+
+3. **Follow-Up Identification:**
+
+   * For each contact:
+
+     * Find last outgoing email date.
+     * Find latest incoming email after that.
+     * If no reply and days > threshold → mark as overdue.
+
+4. **Incremental Sync:**
+
+   * Save last sync date in `sync_log`.
+   * On next sync, only pull emails newer than that date.
+
+---
+
+## 🧪 Testing Strategy
+
+* **Unit Tests** for all modules (`pytest`).
+* **Integration Tests** for email sync using mock IMAP/SMTP servers.
+* **UI Tests** with Streamlit test client.
+* **Data Validation Tests** (ensure no duplicates, correct timestamps).
+
+**Target Coverage:** ≥ 80%
+
+---
+
+## 🚀 Development Phases
+
+| Phase | Duration | Module           | Description                         |
+| ----- | -------- | ---------------- | ----------------------------------- |
+| 1     | 1–2h     | Auth             | Admin + Auditor login, SQLite setup |
+| 2     | 1–2h     | Company List     | Upload + edit company contacts      |
+| 3     | 2h       | Email Sync       | IMAP/SMTP fetch + checkpoint logic  |
+| 4     | 1h       | Working Day Calc | Utility for follow-up days          |
+| 5     | 2h       | Dashboard        | Email counts + overdue detection    |
+| 6     | 1h       | Admin Panel      | Manage auditors, settings, domains  |
+| 7     | 1h       | Export + Testing | Excel export + full test run        |
+
+---
+
+## 🧭 Development Principles
+
+* **≤200 LOC per file** (readable AI-cooperative modules)
+* **Rapid Lean Loops** → Plan → Code → Test → Refactor → Ship (≤2h each)
+* **Conventional Commits:**
+
+  * `feat: add email sync checkpoint logic`
+  * `fix: correct working day count on weekends`
+* **CI/CD:** GitHub Actions → Streamlit Cloud Deploy
+
+---
+
+## 📈 Impact Metrics
+
+| Metric                          | Target  |
+| ------------------------------- | ------- |
+| Email sync accuracy             | ≥ 95%   |
+| App load time                   | < 3s    |
+| Follow-up detection correctness | ≥ 98%   |
+| Test coverage                   | ≥ 80%   |
+| Auditor onboarding time         | < 5 min |
+
+---
+
+## 🔒 Security Considerations
+
+* Passwords hashed (bcrypt).
+* Email credentials AES-encrypted before storing.
+* No plain-text credentials in memory longer than necessary.
+* Secure Streamlit secrets management for encryption key.
+
+---
+
+## ✅ Next Steps
+
+1. Initialize repo with modular folder structure.
+2. Build `db_manager.py` and seed admin credentials.
+3. Implement `auth/login.py` and `register.py`.
+4. Connect dashboard with SQLite.
+5. Test email sync using test IMAP account.
+
+---
+
+**Author:** Sir Banya
+**Prepared for:** Baba Riri
+**Version:** v1.0 – MVP PRD + Dev Plan
