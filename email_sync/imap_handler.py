@@ -24,7 +24,14 @@ class IMAPHandler:
     def connect(self, callback=None) -> bool:
         """Connect to IMAP server"""
         try:
-            self.connection = imaplib.IMAP4_SSL(self.host, self.port)
+            # Configure timeout (default 20s). If Streamlit secrets provide a value, use it.
+            timeout = 20
+            try:
+                import streamlit as st
+                timeout = int(st.secrets.get("imap_timeout_seconds", 20))
+            except Exception:
+                pass
+            self.connection = imaplib.IMAP4_SSL(self.host, self.port, timeout=timeout)
             self.connection.login(self.email, self.password)
             logger.info(f"IMAP connected successfully for {self.email}")
             if callback:

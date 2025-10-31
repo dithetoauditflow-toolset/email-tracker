@@ -18,6 +18,14 @@ def _is_cloud_mode() -> bool:
         return False
 
 
+def _allow_imap() -> bool:
+    """Return True if IMAP is explicitly allowed via secrets (for Cloud overrides)."""
+    try:
+        return bool(st.secrets.get("allow_imap", False))
+    except Exception:
+        return False
+
+
 def get_encryption_key() -> bytes:
     """
     Get encryption key from Streamlit secrets or generate one.

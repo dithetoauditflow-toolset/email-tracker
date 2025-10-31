@@ -10,7 +10,7 @@ import re
 import datetime as dt
 from data.db_manager import DatabaseManager
 from email_sync.sync_manager import EmailSyncManager
-from utils.encryption import encrypt_email_config, decrypt_email_config, _is_cloud_mode
+from utils.encryption import encrypt_email_config, decrypt_email_config, _is_cloud_mode, _allow_imap
 from auth.session_manager import get_current_user
 from config import MAIN_DB_PATH
 from email_sync.imap_handler import IMAPHandler
@@ -173,8 +173,8 @@ def show_overview_tab(auditor_id: int, db_path: str):
     with c1:
         st.caption(f"Last Sync: {last_sync_str or 'Never'}" + (f"  •  Status: {sync_row[1]}" if sync_row and sync_row[1] else ""))
     with c2:
-        if _is_cloud_mode():
-            st.info("Email sync via IMAP is disabled on Cloud. Use local deployment or API-based sync.")
+        if _is_cloud_mode() and not _allow_imap():
+            st.info("Email sync via IMAP is disabled on Cloud. To enable temporarily, set allow_imap = true in Secrets (may be blocked by the platform).")
         else:
             if st.button("🔄 Sync Emails Now", type="primary", key="overview_sync_now"):
                 progress = st.progress(0.0)
@@ -557,8 +557,8 @@ def show_email_sync_tab(user: dict, db_path: str):
     """Show email synchronization interface"""
     st.subheader("Email Synchronization")
     cloud = _is_cloud_mode()
-    if cloud:
-        st.info("Email synchronization via IMAP is disabled on Streamlit Cloud. Run locally or switch to API-based sync (Microsoft Graph/Gmail) in a future phase.")
+    if cloud and not _allow_imap():
+        st.info("Email synchronization via IMAP is disabled on Streamlit Cloud. To enable temporarily, set allow_imap = true in Secrets. Note: networking limits may still block IMAP.")
         return
     
     # Check if email config exists
